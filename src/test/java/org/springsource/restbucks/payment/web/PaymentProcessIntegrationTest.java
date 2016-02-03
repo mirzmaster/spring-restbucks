@@ -17,6 +17,8 @@ package org.springsource.restbucks.payment.web;
 
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
+import static org.springframework.restdocs.hypermedia.HypermediaDocumentation.*;
+import static org.springframework.restdocs.payload.PayloadDocumentation.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -36,6 +38,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springsource.restbucks.AbstractWebIntegrationTest;
+import org.springsource.restbucks.DocumentationFlow;
 import org.springsource.restbucks.Restbucks;
 import org.springsource.restbucks.order.Order;
 
@@ -66,6 +69,8 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 	 */
 	@Test
 	public void processExistingOrder() throws Exception {
+
+		this.flow = DocumentationFlow.of("pay-order");
 
 		MockHttpServletResponse response = accessRootResource();
 
@@ -116,10 +121,12 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 		LOG.info("Accessing root resource…");
 
-		MockHttpServletResponse response = mvc.perform(get("/")). //
-				andExpect(status().isOk()). //
-				andExpect(linkWithRelIsPresent(ORDERS_REL)). //
-				andReturn().getResponse();
+		MockHttpServletResponse response = mvc.perform(get("/"))//
+				.andExpect(status().isOk())//
+				.andExpect(linkWithRelIsPresent(ORDERS_REL))//
+				.andDo(flow.documentUnmasked("access-api",
+						relaxedLinks(linkWithRel(ORDERS_REL).description("Pointing to the orders resource."))))//
+				.andReturn().getResponse();
 
 		return response;
 	}
@@ -142,13 +149,16 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 		ClassPathResource resource = new ClassPathResource("order.json");
 		byte[] data = Files.readAllBytes(resource.getFile().toPath());
 
-		MockHttpServletResponse result = mvc
-				.perform(post(ordersLink.expand().getHref()).contentType(MediaType.APPLICATION_JSON).content(data)). //
-				andExpect(status().isCreated()). //
-				andExpect(header().string("Location", is(notNullValue()))). //
-				andReturn().getResponse();
-
-		return mvc.perform(get(result.getHeader("Location"))).andReturn().getResponse();
+		return mvc
+				.perform(post(ordersLink.expand().getHref())//
+						.contentType(MediaType.APPLICATION_JSON)//
+						.content(data)//
+						.accept(MediaTypes.HAL_JSON))//
+				.andExpect(status().isCreated())//
+				.andExpect(header().string("Location", is(notNullValue())))//
+				.andDo(flow.document("create-order",
+						relaxedLinks(linkWithRel(PAYMENT_REL).description("A link pointing to the payment resource."))))//
+				.andReturn().getResponse();
 	}
 
 	/**
@@ -166,9 +176,9 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 		LOG.info("Root resource returned: " + content);
 		LOG.info(String.format("Found orders link pointing to %s… Following…", ordersLink));
 
-		MockHttpServletResponse response = mvc.perform(get(ordersLink.expand().getHref())). //
-				andExpect(status().isOk()). //
-				andReturn().getResponse();
+		MockHttpServletResponse response = mvc.perform(get(ordersLink.expand().getHref()))//
+				.andExpect(status().isOk())//
+				.andReturn().getResponse();
 
 		LOG.info("Found orders: " + response.getContentAsString());
 		return response;
@@ -197,6 +207,9 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 				andExpect(linkWithRelIsPresent(CANCEL_REL)). //
 				andExpect(linkWithRelIsPresent(UPDATE_REL)). //
 				andExpect(linkWithRelIsPresent(PAYMENT_REL)).//
+				andDo(flow.document("access-order",
+						relaxedLinks(linkWithRel(PAYMENT_REL).description("A link pointing to the payment resource."))))
+				. //
 				andReturn().getResponse();
 	}
 
@@ -221,21 +234,31 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 		LOG.info("Triggering payment…");
 
-		ResultActions action = mvc.perform(put(paymentLink.getHref()).//
-				content("\"1234123412341234\"").//
-				contentType(MediaType.APPLICATION_JSON).//
-				accept(MediaTypes.HAL_JSON));
+		ResultActions action = mvc.perform(put(paymentLink.getHref())//
+				.content("\"1234123412341234\"")//
+				.contentType(MediaType.APPLICATION_JSON)//
+				.accept(MediaTypes.HAL_JSON));
 
-		MockHttpServletResponse result = action.andExpect(status().isCreated()). //
-				andExpect(linkWithRelIsPresent(ORDER_REL)). //
-				andReturn().getResponse();
+		MockHttpServletResponse result = action.andExpect(status().isCreated())//
+				.andExpect(linkWithRelIsPresent(ORDER_REL))//
+				.andDo(flow.document("trigger-payment",
+						relaxedResponseFields(fieldWithPath("amount").description("The amount paid."),
+								fieldWithPath("creditCard").description("Information about the credit card used.")),
+						relaxedLinks(linkWithRel(ORDER_REL).description("Pointing back to the order to poll for updates."))))//
+				.andReturn().getResponse();
 
 		LOG.info("Payment triggered…");
 
 		// Make sure we cannot cheat and cancel the order after it has been payed
 		LOG.info("Faking a cancel request to make sure it's forbidden…");
 		Link selfLink = discoverer.findLinkWithRel(Link.REL_SELF, content).expand();
-		mvc.perform(delete(selfLink.getHref())).andExpect(status().isMethodNotAllowed());
+
+		mvc.perform(get(selfLink.getHref()))//
+				.andExpect(linkWithRelIsNotPresent(PAYMENT_REL))//
+				.andDo(flow.document("order-not-payable"));
+
+		mvc.perform(delete(selfLink.getHref()))//
+				.andExpect(status().isMethodNotAllowed());
 
 		return result;
 	}
@@ -279,9 +302,9 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 			if (status == HttpStatus.OK.value()) {
 
-				action.andExpect(linkWithRelIsPresent(Link.REL_SELF)). //
-						andExpect(linkWithRelIsNotPresent(UPDATE_REL)). //
-						andExpect(linkWithRelIsNotPresent(CANCEL_REL));
+				action.andExpect(linkWithRelIsPresent(Link.REL_SELF))//
+						.andExpect(linkWithRelIsNotPresent(UPDATE_REL))//
+						.andExpect(linkWithRelIsNotPresent(CANCEL_REL));
 
 				receiptLink = discoverer.findLinkWithRel(RECEIPT_REL, pollResponse.getContentAsString());
 
@@ -291,6 +314,12 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 			if (receiptLink == null) {
 				Thread.sleep(2000);
+			} else {
+
+				// One more request for documentation purposes
+				mvc.perform(get(orderLink.expand().getHref()))//
+						.andDo(flow.document("order-prepared",
+								relaxedLinks(linkWithRel(RECEIPT_REL).description("Pointing to a receipt."))));
 			}
 
 		} while (receiptLink == null);
@@ -300,7 +329,7 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 	/**
 	 * Concludes the {@link Order} by looking up the {@code receipt} link from the response and follows it. Triggers a
-	 * {@code DELETE} request susequently.
+	 * {@code DELETE} request subsequently.
 	 * 
 	 * @param response
 	 * @return
@@ -310,20 +339,21 @@ public class PaymentProcessIntegrationTest extends AbstractWebIntegrationTest {
 
 		Link receiptLink = getDiscovererFor(response).findLinkWithRel(RECEIPT_REL, response.getContentAsString());
 
-		MockHttpServletResponse receiptResponse = mvc.perform(get(receiptLink.getHref())). //
-				andExpect(status().isOk()). //
-				andReturn().getResponse();
+		MockHttpServletResponse receiptResponse = mvc.perform(get(receiptLink.getHref()))//
+				.andExpect(status().isOk())//
+				.andDo(flow.document("access-receipt"))//
+				.andReturn().getResponse();
 
 		LOG.info("Accessing receipt, got:" + receiptResponse.getContentAsString());
 		LOG.info("Taking receipt…");
 
 		return mvc
 				.perform( //
-						delete(receiptLink.getHref()).//
-								accept(MediaTypes.HAL_JSON))
-				. //
-				andExpect(status().isOk()). //
-				andReturn().getResponse();
+						delete(receiptLink.getHref())//
+								.accept(MediaTypes.HAL_JSON))//
+				.andExpect(status().isOk())//
+				.andDo(flow.document("take-receipt"))//
+				.andReturn().getResponse();
 	}
 
 	/**

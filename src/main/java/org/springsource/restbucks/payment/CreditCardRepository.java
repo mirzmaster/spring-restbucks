@@ -27,7 +27,7 @@ import org.springframework.data.repository.CrudRepository;
 interface CreditCardRepository extends CrudRepository<CreditCard, Long> {
 
 	/**
-	 * Returns the {@link CreditCard} assicaiated with the given {@link CreditCardNumber}.
+	 * Returns the {@link CreditCard} associated with the given {@link CreditCardNumber}.
 	 * 
 	 * @param number must not be {@literal null}.
 	 * @return
