@@ -1,5 +1,5 @@
 /*
- * Copyright 2013-2016 the original author or authors.
+ * Copyright 2013-2017 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,13 @@ package org.springsource.restbucks;
 
 import static org.hamcrest.Matchers.*;
 import static org.junit.Assert.*;
-import static org.springframework.restdocs.mockmvc.MockMvcRestDocumentation.*;
-
-import java.util.Locale;
 
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.restdocs.AutoConfigureRestDocs;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.hateoas.LinkDiscoverer;
 import org.springframework.hateoas.LinkDiscoverers;
@@ -34,9 +33,6 @@ import org.springframework.test.context.junit4.SpringRunner;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.ResultMatcher;
-import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
-import org.springframework.test.web.servlet.setup.MockMvcConfigurer;
 import org.springframework.web.context.WebApplicationContext;
 
 /**
@@ -46,26 +42,19 @@ import org.springframework.web.context.WebApplicationContext;
  */
 @RunWith(SpringRunner.class)
 @SpringBootTest
+@AutoConfigureMockMvc
+@AutoConfigureRestDocs(outputDir = "target/generated-snippets", uriHost = "api.example.com")
 public abstract class AbstractWebIntegrationTest {
 
 	@Autowired WebApplicationContext context;
 	@Autowired LinkDiscoverers links;
 	@Rule public JUnitRestDocumentation restDocumentation = new JUnitRestDocumentation("target/generated-snippets");
 
-	protected MockMvc mvc;
+	@Autowired protected MockMvc mvc;
 	protected DocumentationFlow flow;
 
 	@Before
 	public void setUp() {
-
-		MockMvcConfigurer documentationConfiguration = documentationConfiguration(this.restDocumentation)//
-				.uris().withHost("api.example.com").withPort(80);
-
-		this.mvc = MockMvcBuilders.webAppContextSetup(context)//
-				.defaultRequest(MockMvcRequestBuilders.get("/").locale(Locale.US))//
-				.apply(documentationConfiguration)//
-				.build();
-
 		this.flow = DocumentationFlow.NONE;
 	}
 
